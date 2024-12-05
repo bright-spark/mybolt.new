@@ -13,6 +13,7 @@ import {
   duplicateChat,
   createChatFromMessages,
 } from './db';
+import { logger } from '~/utils/logger'; // Import the logger
 
 export interface ChatHistoryItem {
   id: string;
@@ -69,7 +70,8 @@ export function useChatHistory() {
           setReady(true);
         })
         .catch((error) => {
-          toast.error(error.message);
+          logger.error('Error loading chat history:', error); // Log the error
+          setInitialMessages([]); // Return an empty array instead of toast.error
         });
     }
   }, []);
@@ -163,12 +165,12 @@ export function useChatHistory() {
   };
 }
 
+/**
+ * Using useNavigate directly causes a rerender for <Chat /> that breaks the app.
+ * Instead, we use window.location.href to navigate without triggering a rerender.
+ * This is a temporary solution until we can properly fix the rerendering issue.
+ */
 function navigateChat(nextId: string) {
-  /**
-   * FIXME: Using the intended navigate function causes a rerender for <Chat /> that breaks the app.
-   *
-   * `navigate(`/chat/${nextId}`, { replace: true });`
-   */
   const url = new URL(window.location.href);
   url.pathname = `/chat/${nextId}`;
 

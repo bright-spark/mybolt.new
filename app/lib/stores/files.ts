@@ -107,9 +107,13 @@ export class FilesStore {
 
       logger.info('File updated');
     } catch (error) {
-      logger.error('Failed to update file content\n\n', error);
+      logger.error('Error handling file operation:', error);
 
-      throw error;
+      if (error instanceof Error) {
+        throw new Error(`File operation failed: ${error.message}`);
+      }
+
+      throw new Error('File operation failed due to an unknown error');
     }
   }
 

@@ -1,5 +1,6 @@
 import type { ModelInfo, OllamaApiResponse, OllamaModel } from './types';
 import type { ProviderInfo } from '~/types/model';
+import { logger } from '~/utils/logger';
 
 export const WORK_DIR_NAME = 'project';
 export const WORK_DIR = `/home/${WORK_DIR_NAME}`;
@@ -360,11 +361,14 @@ function checkApiKeys() {
     .filter(([_, hasKey]) => hasKey)
     .map(([provider]) => provider);
 
-  console.log('Available Providers:', availableProviders);
-  console.log('API Key Checks:', apiKeyChecks);
+  // Log provider availability in development mode only
+  if (import.meta.env.DEV) {
+    logger.debug('Available Providers:', availableProviders);
+    logger.debug('API Key Checks:', apiKeyChecks);
+  }
 
   if (availableProviders.length === 0) {
-    console.warn('No API keys found in import.meta.env');
+    logger.warn('No API keys found in import.meta.env');
     return false;
   }
 
@@ -415,7 +419,7 @@ async function getOllamaModels(): Promise<ModelInfo[]> {
       maxTokenAllowed: 8000,
     }));
   } catch (e) {
-    console.error('Error getting Ollama models:', e);
+    logger.error('Error getting Ollama models:', e);
     return [];
   }
 }
@@ -431,7 +435,7 @@ async function getOpenAILikeModels(): Promise<ModelInfo[]> {
     const apiKey = import.meta.env.OPENAI_LIKE_API_KEY || '';
 
     if (!apiKey) {
-      console.warn('OPENAI_LIKE_API_KEY is missing. Skipping OpenAILike models retrieval.');
+      logger.warn('OPENAI_LIKE_API_KEY is missing. Skipping OpenAILike models retrieval.');
       return [];
     }
 
@@ -448,7 +452,7 @@ async function getOpenAILikeModels(): Promise<ModelInfo[]> {
       provider: 'OpenAILike',
     }));
   } catch (e) {
-    console.error('Error getting OpenAILike models:', e);
+    logger.error('Error getting OpenAILike models:', e);
     return [];
   }
 }
@@ -502,7 +506,7 @@ async function getLMStudioModels(): Promise<ModelInfo[]> {
       provider: 'LMStudio',
     }));
   } catch (e) {
-    console.error('Error getting LMStudio models:', e);
+    logger.error('Error getting LMStudio models:', e);
     return [];
   }
 }

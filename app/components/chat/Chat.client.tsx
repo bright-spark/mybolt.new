@@ -320,6 +320,25 @@ export const ChatImpl = memo(
         importChat={importChat}
         exportChat={exportChat}
         messages={messages.map((message, i) => {
+          type MessageRole = 'system' | 'user' | 'assistant' | 'tool' | 'function' | 'data';
+          type ColorMap = {
+            readonly [key in MessageRole | 'error' | 'warning' | 'info']: string;
+          };
+
+          const colorMap: ColorMap = {
+            system: 'gray',
+            user: 'blue',
+            assistant: 'green',
+            tool: 'purple',
+            function: 'orange',
+            data: 'teal',
+            error: 'red',
+            warning: 'yellow',
+            info: 'cyan',
+          };
+
+          const color = colorMap[message.role as MessageRole] || 'gray';
+
           if (message.role === 'user') {
             return message;
           }
@@ -327,6 +346,7 @@ export const ChatImpl = memo(
           return {
             ...message,
             content: parsedMessages[i] || '',
+            color,
           };
         })}
         enhancePrompt={() => {

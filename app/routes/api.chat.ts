@@ -1,17 +1,15 @@
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-nocheck – TODO: Provider proper types
-
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
 import { MAX_RESPONSE_SEGMENTS, MAX_TOKENS } from '~/lib/.server/llm/constants';
 import { CONTINUE_PROMPT } from '~/lib/.server/llm/prompts';
 import { streamText, type Messages, type StreamingOptions } from '~/lib/.server/llm/stream-text';
 import SwitchableStream from '~/lib/.server/llm/switchable-stream';
+import { logger } from '~/utils/logger';
 
 export async function action(args: ActionFunctionArgs) {
   return chatAction(args);
 }
 
-function parseCookies(cookieHeader: string | null) {
+function parseCookies(cookieHeader: string | null): Record<string, string> {
   const cookies: Record<string, string> = {};
 
   if (!cookieHeader) {
@@ -50,7 +48,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     try {
       apiKeys = JSON.parse(parseCookies(cookieHeader).apiKeys || '{}');
     } catch (error) {
-      console.error('Error parsing API keys from cookies:', error);
+      logger.error('Error parsing API keys from cookies:', error);
 
       // Continue with empty API keys object
     }
@@ -73,7 +71,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
 
           const switchesLeft = MAX_RESPONSE_SEGMENTS - stream.switches;
 
-          console.log(`Reached max token limit (${MAX_TOKENS}): Continuing message (${switchesLeft} switches left)`);
+          logger.info(`Reached max token limit (${MAX_TOKENS}): Continuing message (${switchesLeft} switches left)`);
 
           messages.push({ role: 'assistant', content });
           messages.push({ role: 'user', content: CONTINUE_PROMPT });
@@ -94,33 +92,47 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
           'Content-Type': 'text/plain; charset=utf-8',
         },
       });
-    } catch (error) {
-      console.error('Error in chat stream:', error);
+    } catch (error: unknown) {
+      logger.error('Error in chat stream:', error);
 
-      if (error.message?.toLowerCase().includes('api key')) {
-        throw new Response('Invalid or missing API key', {
-          status: 401,
-          statusText: 'Unauthorized',
+      if (error instanceof Error) {
+        if (error.message.toLowerCase().includes('api key')) {
+          throw new Response('Invalid or missing API key', {
+            status: 401,
+            statusText: 'Unauthorized',
+          });
+        }
+
+        if (error.message.toLowerCase().includes('rate limit')) {
+          throw new Response('Rate limit exceeded', {
+            status: 429,
+            statusText: 'Too Many Requests',
+          });
+        }
+
+        throw new Response(error.message, {
+          status: 500,
+          statusText: 'Internal Server Error',
         });
       }
 
-      if (error.message?.toLowerCase().includes('rate limit')) {
-        throw new Response('Rate limit exceeded', {
-          status: 429,
-          statusText: 'Too Many Requests',
-        });
-      }
-
-      throw new Response(error.message || 'Internal Server Error', {
+      throw new Response('Unknown error occurred', {
         status: 500,
         statusText: 'Internal Server Error',
       });
     }
-  } catch (error) {
-    console.error('Error in chat action:', error);
+  } catch (error: unknown) {
+    logger.error('Error in chat action:', error);
 
     if (error instanceof Response) {
       throw error;
+    }
+
+    if (error instanceof Error) {
+      throw new Response(error.message, {
+        status: 400,
+        statusText: 'Bad Request',
+      });
     }
 
     throw new Response('Invalid request format', {

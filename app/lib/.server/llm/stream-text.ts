@@ -1,11 +1,10 @@
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-nocheck – TODO: Provider proper types
-
 import { convertToCoreMessages, streamText as _streamText } from 'ai';
 import { getModel } from '~/lib/.server/llm/model';
 import { MAX_TOKENS } from './constants';
 import { getSystemPrompt } from './prompts';
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, MODEL_LIST, MODEL_REGEX, PROVIDER_REGEX } from '~/utils/constants';
+import type { LanguageModelV1 } from 'ai';
+import type { ProviderInfo } from '~/types/model';
 
 interface ToolResult<Name extends string, Args, Result> {
   toolCallId: string;
@@ -21,11 +20,30 @@ interface Message {
   model?: string;
 }
 
+interface ToolInvocation extends ToolResult<string, unknown, unknown> {
+  state: 'result';
+}
+
+interface ProcessedMessage extends Omit<Message, 'toolInvocations'> {
+  toolInvocations?: ToolInvocation[];
+}
+
 export type Messages = Message[];
 
-export type StreamingOptions = Omit<Parameters<typeof _streamText>[0], 'model'>;
+type BaseAIOptions = Parameters<typeof _streamText>[0];
 
-function extractPropertiesFromMessage(message: Message): { model: string; provider: string; content: string } {
+interface BaseStreamingOptions extends Omit<BaseAIOptions, 'model' | 'messages' | 'maxTokens' | 'system'> {
+  toolChoice?: 'none' | 'auto';
+}
+
+export interface StreamingOptions extends BaseStreamingOptions {
+  apiKeys?: Record<string, string>;
+  model?: string;
+}
+
+type Provider = ProviderInfo['name'];
+
+function extractPropertiesFromMessage(message: Message): { model: string; provider: Provider; content: string } {
   const textContent = Array.isArray(message.content)
     ? message.content.find((item) => item.type === 'text')?.text || ''
     : message.content;
@@ -33,24 +51,15 @@ function extractPropertiesFromMessage(message: Message): { model: string; provid
   const modelMatch = textContent.match(MODEL_REGEX);
   const providerMatch = textContent.match(PROVIDER_REGEX);
 
-  /*
-   * Extract model
-   * const modelMatch = message.content.match(MODEL_REGEX);
-   */
   const model = modelMatch ? modelMatch[1] : DEFAULT_MODEL;
-
-  /*
-   * Extract provider
-   * const providerMatch = message.content.match(PROVIDER_REGEX);
-   */
-  const provider = providerMatch ? providerMatch[1] : DEFAULT_PROVIDER;
+  const provider = (providerMatch ? providerMatch[1] : DEFAULT_PROVIDER) as Provider;
 
   const cleanedContent = Array.isArray(message.content)
     ? message.content.map((item) => {
         if (item.type === 'text') {
           return {
-            type: 'text',
-            text: item.text?.replace(MODEL_REGEX, '').replace(PROVIDER_REGEX, ''),
+            ...item,
+            text: item.text.replace(MODEL_REGEX, '').replace(PROVIDER_REGEX, ''),
           };
         }
 
@@ -63,9 +72,19 @@ function extractPropertiesFromMessage(message: Message): { model: string; provid
 
 export function streamText(messages: Messages, env: Env, options?: StreamingOptions, apiKeys?: Record<string, string>) {
   let currentModel = DEFAULT_MODEL;
-  let currentProvider = DEFAULT_PROVIDER;
+  let currentProvider = DEFAULT_PROVIDER as unknown as Provider;
 
-  const processedMessages = messages.map((message) => {
+  const processedMessages = messages.map((message): ProcessedMessage => {
+    // First create a copy without toolInvocations
+    const { toolInvocations, ...rest } = message;
+    const processed: ProcessedMessage = {
+      ...rest,
+      toolInvocations: toolInvocations?.map((invocation) => ({
+        ...invocation,
+        state: 'result' as const,
+      })),
+    };
+
     if (message.role === 'user') {
       const { model, provider, content } = extractPropertiesFromMessage(message);
 
@@ -74,20 +93,21 @@ export function streamText(messages: Messages, env: Env, options?: StreamingOpti
       }
 
       currentProvider = provider;
-
-      return { ...message, content };
+      processed.content = content;
     }
 
-    return message;
+    return processed;
   });
 
   const modelDetails = MODEL_LIST.find((m) => m.name === currentModel);
-
   const dynamicMaxTokens = modelDetails && modelDetails.maxTokenAllowed ? modelDetails.maxTokenAllowed : MAX_TOKENS;
+
+  // Cast the model to LanguageModelV1 to handle type mismatch between SDK versions
+  const model = getModel(currentProvider, currentModel, env, apiKeys) as LanguageModelV1;
 
   return _streamText({
     ...options,
-    model: getModel(currentProvider, currentModel, env, apiKeys),
+    model,
     system: getSystemPrompt(),
     maxTokens: dynamicMaxTokens,
     messages: convertToCoreMessages(processedMessages),

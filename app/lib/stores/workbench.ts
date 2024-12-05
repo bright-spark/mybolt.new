@@ -15,6 +15,7 @@ import { Octokit, type RestEndpointMethodTypes } from '@octokit/rest';
 import * as nodePath from 'node:path';
 import { extractRelativePath } from '~/utils/diff';
 import { description } from '~/lib/persistence';
+import { logger } from '~/utils/logger'; // Import the logger
 
 export interface ArtifactState {
   id: string;
@@ -417,12 +418,23 @@ export class WorkbenchStore {
       } catch (error) {
         if (error instanceof Error && 'status' in error && error.status === 404) {
           // Repository doesn't exist, so create a new one
-          const { data: newRepo } = await octokit.repos.createForAuthenticatedUser({
-            name: repoName,
-            private: false,
-            auto_init: true,
-          });
-          repo = newRepo;
+          try {
+            const { data: newRepo } = await octokit.repos.createForAuthenticatedUser({
+              name: repoName,
+              private: false,
+              auto_init: true,
+            });
+            repo = newRepo;
+          } catch (error) {
+            // Handle repository creation errors gracefully
+            logger.error('Failed to create repository:', error);
+
+            if (error instanceof Error) {
+              throw new Error(`Repository creation failed: ${error.message}`);
+            }
+
+            throw new Error('Repository creation failed due to an unknown error');
+          }
         } else {
           console.log('cannot create repo!');
           throw error; // Some other error occurred
