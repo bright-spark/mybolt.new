@@ -87,16 +87,21 @@ export class FilesStore {
       const relativePath = nodePath.relative(webcontainer.workdir, filePath);
 
       if (!relativePath) {
-        throw new Error(`EINVAL: invalid file path, write '${relativePath}'`);
+        const errorMessage = `EINVAL: invalid file path, write '${relativePath}'`;
+        logger.error(errorMessage);
+        throw new Error(errorMessage);
       }
 
       const oldContent = this.getFile(filePath)?.content;
 
       if (!oldContent) {
-        unreachable('Expected content to be defined');
+        const errorMessage = 'Expected content to be defined';
+        logger.error(errorMessage);
+        unreachable(errorMessage);
       }
 
       await webcontainer.fs.writeFile(relativePath, content);
+      logger.info(`File written successfully: ${filePath}`);
 
       if (!this.#modifiedFiles.has(filePath)) {
         this.#modifiedFiles.set(filePath, oldContent);
@@ -107,13 +112,8 @@ export class FilesStore {
 
       logger.info('File updated');
     } catch (error) {
-      logger.error('Error handling file operation:', error);
-
-      if (error instanceof Error) {
-        throw new Error(`File operation failed: ${error.message}`);
-      }
-
-      throw new Error('File operation failed due to an unknown error');
+      logger.error(`Error writing file: ${filePath}`, error);
+      throw error;
     }
   }
 

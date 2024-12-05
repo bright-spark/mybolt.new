@@ -119,9 +119,14 @@ export class ActionRunner {
       startTime: Date.now(),
     });
 
+    let isCompleted = false;
+    let timeoutId: NodeJS.Timeout;
+
     const timeoutPromise = new Promise<void>((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`Action ${actionId} timed out after ${EXECUTION_TIMEOUT}ms`));
+      timeoutId = setTimeout(() => {
+        if (!isCompleted) {
+          reject(new Error(`Action ${actionId} timed out after ${EXECUTION_TIMEOUT}ms`));
+        }
       }, EXECUTION_TIMEOUT);
     });
 
@@ -130,6 +135,8 @@ export class ActionRunner {
         .then(async () => {
           logger.debug(`Executing action ${actionId}`);
           await this.#executeAction(actionId, isStreaming);
+          isCompleted = true;
+          clearTimeout(timeoutId);
         })
         .catch((error) => {
           const errorMessage = error instanceof Error ? error.message : String(error);
@@ -158,12 +165,14 @@ export class ActionRunner {
           return Promise.resolve();
         }),
       timeoutPromise.catch((error) => {
-        logger.error(`Timeout error for action ${actionId}: ${error.message}`);
-        this.#updateAction(actionId, {
-          status: 'failed',
-          error: `Timeout: ${error.message}`,
-          endTime: Date.now(),
-        });
+        if (!isCompleted) {
+          logger.error(`Timeout error for action ${actionId}: ${error.message}`);
+          this.#updateAction(actionId, {
+            status: 'failed',
+            error: `Timeout: ${error.message}`,
+            endTime: Date.now(),
+          });
+        }
 
         return Promise.resolve();
       }),
