@@ -12,6 +12,7 @@ export default class LMStudioProvider extends BaseProvider {
 
   config = {
     baseUrlKey: 'LMSTUDIO_API_BASE_URL',
+    baseUrl: 'http://localhost:1234/',
   };
 
   staticModels: ModelInfo[] = [];
@@ -21,33 +22,27 @@ export default class LMStudioProvider extends BaseProvider {
     settings?: IProviderSetting,
     serverEnv: Record<string, string> = {},
   ): Promise<ModelInfo[]> {
-    try {
-      const { baseUrl } = this.getProviderBaseUrlAndKey({
-        apiKeys,
-        providerSettings: settings,
-        serverEnv,
-        defaultBaseUrlKey: 'LMSTUDIO_API_BASE_URL',
-        defaultApiTokenKey: '',
-      });
+    const { baseUrl } = this.getProviderBaseUrlAndKey({
+      apiKeys,
+      providerSettings: settings,
+      serverEnv,
+      defaultBaseUrlKey: 'LMSTUDIO_API_BASE_URL',
+      defaultApiTokenKey: '',
+    });
 
-      if (!baseUrl) {
-        return [];
-      }
-
-      const response = await fetch(`${baseUrl}/v1/models`);
-      const data = (await response.json()) as { data: Array<{ id: string }> };
-
-      return data.data.map((model) => ({
-        name: model.id,
-        label: model.id,
-        provider: this.name,
-        maxTokenAllowed: 8000,
-      }));
-    } catch (error: any) {
-      console.log('Error getting LMStudio models:', error.message);
-
+    if (!baseUrl) {
       return [];
     }
+
+    const response = await fetch(`${baseUrl}/v1/models`);
+    const data = (await response.json()) as { data: Array<{ id: string }> };
+
+    return data.data.map((model) => ({
+      name: model.id,
+      label: model.id,
+      provider: this.name,
+      maxTokenAllowed: 8000,
+    }));
   }
   getModelInstance: (options: {
     model: string;

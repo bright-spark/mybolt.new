@@ -3,7 +3,7 @@
  * Preventing TS checks with files presented in the video for a better presentation.
  */
 import type { Message } from 'ai';
-import React, { type RefCallback, useEffect, useState } from 'react';
+import React, { type RefCallback, useCallback, useEffect, useState } from 'react';
 import { ClientOnly } from 'remix-utils/client-only';
 import { Menu } from '~/components/sidebar/Menu.client';
 import { IconButton } from '~/components/ui/IconButton';
@@ -12,7 +12,7 @@ import { classNames } from '~/utils/classNames';
 import { MODEL_LIST, PROVIDER_LIST, initializeModelList } from '~/utils/constants';
 import { Messages } from './Messages.client';
 import { SendButton } from './SendButton.client';
-import { APIKeyManager } from './APIKeyManager';
+import { APIKeyManager, getApiKeysFromCookies } from './APIKeyManager';
 import Cookies from 'js-cookie';
 import * as Tooltip from '@radix-ui/react-tooltip';
 
@@ -31,6 +31,7 @@ import { toast } from 'react-toastify';
 import StarterTemplates from './StarterTemplates';
 import type { ActionAlert } from '~/types/actions';
 import ChatAlert from './ChatAlert';
+import { LLMManager } from '~/lib/modules/llm/manager';
 
 const TEXTAREA_MIN_HEIGHT = 76;
 
@@ -100,53 +101,15 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
     ref,
   ) => {
     const TEXTAREA_MAX_HEIGHT = chatStarted ? 400 : 200;
-    const [apiKeys, setApiKeys] = useState<Record<string, string>>(() => {
-      const savedKeys = Cookies.get('apiKeys');
-
-      if (savedKeys) {
-        try {
-          return JSON.parse(savedKeys);
-        } catch (error) {
-          console.error('Failed to parse API keys from cookies:', error);
-          return {};
-        }
-      }
-
-      return {};
-    });
+    const [apiKeys, setApiKeys] = useState<Record<string, string>>(getApiKeysFromCookies());
     const [modelList, setModelList] = useState(MODEL_LIST);
     const [isModelSettingsCollapsed, setIsModelSettingsCollapsed] = useState(false);
     const [isListening, setIsListening] = useState(false);
     const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
     const [transcript, setTranscript] = useState('');
+    const [isModelLoading, setIsModelLoading] = useState<string | undefined>('all');
 
-    useEffect(() => {
-      console.log(transcript);
-    }, [transcript]);
-
-    useEffect(() => {
-      // Load API keys from cookies on component mount
-
-      let parsedApiKeys: Record<string, string> | undefined = {};
-
-      try {
-        const storedApiKeys = Cookies.get('apiKeys');
-
-        if (storedApiKeys) {
-          const parsedKeys = JSON.parse(storedApiKeys);
-
-          if (typeof parsedKeys === 'object' && parsedKeys !== null) {
-            setApiKeys(parsedKeys);
-            parsedApiKeys = parsedKeys;
-          }
-        }
-      } catch (error) {
-        console.error('Error loading API keys from cookies:', error);
-
-        // Clear invalid cookie data
-        Cookies.remove('apiKeys');
-      }
-
+    const getProviderSettings = useCallback(() => {
       let providerSettings: Record<string, IProviderSetting> | undefined = undefined;
 
       try {
@@ -166,11 +129,13 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
         Cookies.remove('providers');
       }
 
-      initializeModelList({ apiKeys: parsedApiKeys, providerSettings }).then((modelList) => {
-        console.log('Model List: ', modelList);
-        setModelList(modelList);
-      });
+      return providerSettings;
+    }, []);
+    useEffect(() => {
+      console.log(transcript);
+    }, [transcript]);
 
+    useEffect(() => {
       if (typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)) {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         const recognition = new SpeechRecognition();
@@ -201,6 +166,65 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
         setRecognition(recognition);
       }
     }, []);
+
+    useEffect(() => {
+      if (typeof window !== 'undefined') {
+        const providerSettings = getProviderSettings();
+        let parsedApiKeys: Record<string, string> | undefined = {};
+
+        try {
+          parsedApiKeys = getApiKeysFromCookies();
+          setApiKeys(parsedApiKeys);
+        } catch (error) {
+          console.error('Error loading API keys from cookies:', error);
+
+          // Clear invalid cookie data
+          Cookies.remove('apiKeys');
+        }
+        setIsModelLoading('all');
+        initializeModelList({ apiKeys: parsedApiKeys, providerSettings })
+          .then((modelList) => {
+            // console.log('Model List: ', modelList);
+            setModelList(modelList);
+          })
+          .catch((error) => {
+            console.error('Error initializing model list:', error);
+          })
+          .finally(() => {
+            setIsModelLoading(undefined);
+          });
+      }
+    }, [providerList]);
+
+    const onApiKeysChange = async (providerName: string, apiKey: string) => {
+      const newApiKeys = { ...apiKeys, [providerName]: apiKey };
+      setApiKeys(newApiKeys);
+      Cookies.set('apiKeys', JSON.stringify(newApiKeys));
+
+      const provider = LLMManager.getInstance(import.meta.env || process.env || {}).getProvider(providerName);
+
+      if (provider && provider.getDynamicModels) {
+        setIsModelLoading(providerName);
+
+        try {
+          const providerSettings = getProviderSettings();
+          const staticModels = provider.staticModels;
+          const dynamicModels = await provider.getDynamicModels(
+            newApiKeys,
+            providerSettings,
+            import.meta.env || process.env || {},
+          );
+
+          setModelList((preModels) => {
+            const filteredOutPreModels = preModels.filter((x) => x.provider !== providerName);
+            return [...filteredOutPreModels, ...staticModels, ...dynamicModels];
+          });
+        } catch (error) {
+          console.error('Error loading dynamic models:', error);
+        }
+        setIsModelLoading(undefined);
+      }
+    };
 
     const startListening = () => {
       if (recognition) {
@@ -379,29 +403,32 @@ export const BaseChat = React.forwardRef<HTMLDivElement, BaseChatProps>(
                     <rect className={classNames(styles.PromptShine)} x="48" y="24" width="70" height="1"></rect>
                   </svg>
                   <div>
-                    <div className={isModelSettingsCollapsed ? 'hidden' : ''}>
-                      <ModelSelector
-                        key={provider?.name + ':' + modelList.length}
-                        model={model}
-                        setModel={setModel}
-                        modelList={modelList}
-                        provider={provider}
-                        setProvider={setProvider}
-                        providerList={providerList || (PROVIDER_LIST as ProviderInfo[])}
-                        apiKeys={apiKeys}
-                      />
-                      {(providerList || []).length > 0 && provider && (
-                        <APIKeyManager
-                          provider={provider}
-                          apiKey={apiKeys[provider.name] || ''}
-                          setApiKey={(key) => {
-                            const newApiKeys = { ...apiKeys, [provider.name]: key };
-                            setApiKeys(newApiKeys);
-                            Cookies.set('apiKeys', JSON.stringify(newApiKeys));
-                          }}
-                        />
+                    <ClientOnly>
+                      {() => (
+                        <div className={isModelSettingsCollapsed ? 'hidden' : ''}>
+                          <ModelSelector
+                            key={provider?.name + ':' + modelList.length}
+                            model={model}
+                            setModel={setModel}
+                            modelList={modelList}
+                            provider={provider}
+                            setProvider={setProvider}
+                            providerList={providerList || (PROVIDER_LIST as ProviderInfo[])}
+                            apiKeys={apiKeys}
+                            modelLoading={isModelLoading}
+                          />
+                          {(providerList || []).length > 0 && provider && (
+                            <APIKeyManager
+                              provider={provider}
+                              apiKey={apiKeys[provider.name] || ''}
+                              setApiKey={(key) => {
+                                onApiKeysChange(provider.name, key);
+                              }}
+                            />
+                          )}
+                        </div>
                       )}
-                    </div>
+                    </ClientOnly>
                   </div>
                   <FilePreview
                     files={uploadedFiles}

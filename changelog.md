@@ -1,31 +1,14 @@
-# Release v0.0.3
+# 🚀 Release v0.0.5
 
-### 🔄 Changes since v0.0.2
+## What's Changed 🌟
 
-#### 🐛 Bug Fixes
+### 🔄 Changes since v0.0.4
 
-- Prompt Enhance
+### 🐛 Bug Fixes
 
-
-#### 📚 Documentation
-
-- miniflare error knowledge
+* hotfix auto select starter template works without github token #release ([#959](https://github.com/stackblitz-labs/bolt.diy/pull/959)) by @thecodacus
 
 
-#### 🔧 Chores
+## 📈 Stats
 
-- adding back semantic pull pr check for better changelog system
-- update commit hash to 1e72d52278730f7d22448be9d5cf2daf12559486
-- update commit hash to 282beb96e2ee92ba8b1174aaaf9f270e03a288e8
-
-
-#### 🔍 Other Changes
-
-- Merge remote-tracking branch 'upstream/main'
-- Merge pull request #781 from thecodacus/semantic-pull-pr
-- miniflare and wrangler error
-- simplified the fix
-- Merge branch 'main' into fix/prompt-enhance
-
-
-**Full Changelog**: [`v0.0.2..v0.0.3`](https://github.com/stackblitz-labs/bolt.diy/compare/v0.0.2...v0.0.3)
+**Full Changelog**: [`v0.0.4..v0.0.5`](https://github.com/stackblitz-labs/bolt.diy/compare/v0.0.4...v0.0.5)

@@ -5,10 +5,13 @@ import { CONTINUE_PROMPT } from '~/lib/common/prompts/prompts';
 import { streamText, type Messages, type StreamingOptions } from '~/lib/.server/llm/stream-text';
 import SwitchableStream from '~/lib/.server/llm/switchable-stream';
 import type { IProviderSetting } from '~/types/model';
+import { createScopedLogger } from '~/utils/logger';
 
 export async function action(args: ActionFunctionArgs) {
   return chatAction(args);
 }
+
+const logger = createScopedLogger('api.chat');
 
 function parseCookies(cookieHeader: string): Record<string, string> {
   const cookies: Record<string, string> = {};
@@ -29,10 +32,11 @@ function parseCookies(cookieHeader: string): Record<string, string> {
 }
 
 async function chatAction({ context, request }: ActionFunctionArgs) {
-  const { messages, files, promptId } = await request.json<{
+  const { messages, files, promptId, contextOptimization } = await request.json<{
     messages: Messages;
     files: any;
     promptId?: string;
+    contextOptimization: boolean;
   }>();
 
   const cookieHeader = request.headers.get('Cookie');
@@ -53,7 +57,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
     const options: StreamingOptions = {
       toolChoice: 'none',
       onFinish: async ({ text: content, finishReason, usage }) => {
-        console.log('usage', usage);
+        logger.debug('usage', JSON.stringify(usage));
 
         if (usage) {
           cumulativeUsage.completionTokens += usage.completionTokens || 0;
@@ -62,23 +66,33 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
         }
 
         if (finishReason !== 'length') {
-          return stream
-            .switchSource(
-              createDataStream({
-                async execute(dataStream) {
-                  dataStream.writeMessageAnnotation({
-                    type: 'usage',
-                    value: {
-                      completionTokens: cumulativeUsage.completionTokens,
-                      promptTokens: cumulativeUsage.promptTokens,
-                      totalTokens: cumulativeUsage.totalTokens,
-                    },
-                  });
+          const encoder = new TextEncoder();
+          const usageStream = createDataStream({
+            async execute(dataStream) {
+              dataStream.writeMessageAnnotation({
+                type: 'usage',
+                value: {
+                  completionTokens: cumulativeUsage.completionTokens,
+                  promptTokens: cumulativeUsage.promptTokens,
+                  totalTokens: cumulativeUsage.totalTokens,
                 },
-                onError: (error: any) => `Custom error: ${error.message}`,
-              }),
-            )
-            .then(() => stream.close());
+              });
+            },
+            onError: (error: any) => `Custom error: ${error.message}`,
+          }).pipeThrough(
+            new TransformStream({
+              transform: (chunk, controller) => {
+                // Convert the string stream to a byte stream
+                const str = typeof chunk === 'string' ? chunk : JSON.stringify(chunk);
+                controller.enqueue(encoder.encode(str));
+              },
+            }),
+          );
+          await stream.switchSource(usageStream);
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          stream.close();
+
+          return;
         }
 
         if (stream.switches >= MAX_RESPONSE_SEGMENTS) {
@@ -87,7 +101,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
 
         const switchesLeft = MAX_RESPONSE_SEGMENTS - stream.switches;
 
-        console.log(`Reached max token limit (${MAX_TOKENS}): Continuing message (${switchesLeft} switches left)`);
+        logger.info(`Reached max token limit (${MAX_TOKENS}): Continuing message (${switchesLeft} switches left)`);
 
         messages.push({ role: 'assistant', content });
         messages.push({ role: 'user', content: CONTINUE_PROMPT });
@@ -100,9 +114,12 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
           files,
           providerSettings,
           promptId,
+          contextOptimization,
         });
 
-        return stream.switchSource(result.toDataStream());
+        stream.switchSource(result.toDataStream());
+
+        return;
       },
     };
 
@@ -114,6 +131,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
       files,
       providerSettings,
       promptId,
+      contextOptimization,
     });
 
     stream.switchSource(result.toDataStream());
@@ -125,7 +143,7 @@ async function chatAction({ context, request }: ActionFunctionArgs) {
       },
     });
   } catch (error: any) {
-    console.error(error);
+    logger.error(error);
 
     if (error.message?.includes('API key')) {
       throw new Response('Invalid or missing API key', {
