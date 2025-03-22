@@ -33,7 +33,7 @@ theme:
   # favicon: assets/logo.png
 repo_name: bolt.diy
 repo_url: https://github.com/stackblitz-labs/bolt.diy
-edit_uri: ""
+edit_uri: ''
 
 extra:
   generator: false
@@ -51,9 +51,6 @@ extra:
       link: https://bsky.app/profile/bolt.diy
       name: bolt.diy on Bluesky
 
-      
-
-
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
@@ -66,3 +63,11 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.mark
   - attr_list
+  - md_in_html
+  - tables
+  - def_list
+  - admonition
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - toc:
+      permalink: true

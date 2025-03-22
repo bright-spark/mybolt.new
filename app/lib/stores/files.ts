@@ -2,7 +2,7 @@ import type { PathWatcherEvent, WebContainer } from '@webcontainer/api';
 import { getEncoding } from 'istextorbinary';
 import { map, type MapStore } from 'nanostores';
 import { Buffer } from 'node:buffer';
-import * as nodePath from 'node:path';
+import { path } from '~/utils/path';
 import { bufferWatchEvents } from '~/utils/buffer';
 import { WORK_DIR } from '~/utils/constants';
 import { computeFileModifications } from '~/utils/diff';
@@ -75,6 +75,29 @@ export class FilesStore {
   getFileModifications() {
     return computeFileModifications(this.files.get(), this.#modifiedFiles);
   }
+  getModifiedFiles() {
+    let modifiedFiles: { [path: string]: File } | undefined = undefined;
+
+    for (const [filePath, originalContent] of this.#modifiedFiles) {
+      const file = this.files.get()[filePath];
+
+      if (file?.type !== 'file') {
+        continue;
+      }
+
+      if (file.content === originalContent) {
+        continue;
+      }
+
+      if (!modifiedFiles) {
+        modifiedFiles = {};
+      }
+
+      modifiedFiles[filePath] = file;
+    }
+
+    return modifiedFiles;
+  }
 
   resetFileModifications() {
     this.#modifiedFiles.clear();
@@ -84,7 +107,7 @@ export class FilesStore {
     const webcontainer = await this.#webcontainer;
 
     try {
-      const relativePath = nodePath.relative(webcontainer.workdir, filePath);
+      const relativePath = path.relative(webcontainer.workdir, filePath);
 
       if (!relativePath) {
         throw new Error(`EINVAL: invalid file path, write '${relativePath}'`);
@@ -92,7 +115,7 @@ export class FilesStore {
 
       const oldContent = this.getFile(filePath)?.content;
 
-      if (!oldContent) {
+      if (!oldContent && oldContent !== '') {
         unreachable('Expected content to be defined');
       }
 

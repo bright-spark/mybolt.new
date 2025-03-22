@@ -7,7 +7,7 @@ import { BaseChat } from '~/components/chat/BaseChat';
 import { Chat } from '~/components/chat/Chat.client';
 import { useGit } from '~/lib/hooks/useGit';
 import { useChatHistory } from '~/lib/persistence';
-import { createCommandsMessage, detectProjectCommands } from '~/utils/projectCommands';
+import { createCommandsMessage, detectProjectCommands, escapeBoltTags } from '~/utils/projectCommands';
 import { LoadingOverlay } from '~/components/ui/LoadingOverlay';
 import { toast } from 'react-toastify';
 
@@ -49,53 +49,65 @@ export function GitUrlImport() {
 
     if (repoUrl) {
       const ig = ignore().add(IGNORE_PATTERNS);
-      const { workdir, data } = await gitClone(repoUrl);
 
-      if (importChat) {
-        const filePaths = Object.keys(data).filter((filePath) => !ig.ignores(filePath));
+      try {
+        const { workdir, data } = await gitClone(repoUrl);
 
-        const textDecoder = new TextDecoder('utf-8');
+        if (importChat) {
+          const filePaths = Object.keys(data).filter((filePath) => !ig.ignores(filePath));
+          const textDecoder = new TextDecoder('utf-8');
 
-        // Convert files to common format for command detection
-        const fileContents = filePaths
-          .map((filePath) => {
-            const { data: content, encoding } = data[filePath];
-            return {
-              path: filePath,
-              content: encoding === 'utf8' ? content : content instanceof Uint8Array ? textDecoder.decode(content) : '',
-            };
-          })
-          .filter((f) => f.content);
+          const fileContents = filePaths
+            .map((filePath) => {
+              const { data: content, encoding } = data[filePath];
+              return {
+                path: filePath,
+                content:
+                  encoding === 'utf8' ? content : content instanceof Uint8Array ? textDecoder.decode(content) : '',
+              };
+            })
+            .filter((f) => f.content);
 
-        // Detect and create commands message
-        const commands = await detectProjectCommands(fileContents);
-        const commandsMessage = createCommandsMessage(commands);
+          const commands = await detectProjectCommands(fileContents);
+          const commandsMessage = createCommandsMessage(commands);
 
-        // Create files message
-        const filesMessage: Message = {
-          role: 'assistant',
-          content: `Cloning the repo ${repoUrl} into ${workdir}
-<boltArtifact id="imported-files" title="Git Cloned Files" type="bundled">           
+          const filesMessage: Message = {
+            role: 'assistant',
+            content: `Cloning the repo ${repoUrl} into ${workdir}
+<boltArtifact id="imported-files" title="Git Cloned Files"  type="bundled">
 ${fileContents
   .map(
     (file) =>
       `<boltAction type="file" filePath="${file.path}">
-${file.content}
+${escapeBoltTags(file.content)}
 </boltAction>`,
   )
   .join('\n')}
 </boltArtifact>`,
-          id: generateId(),
-          createdAt: new Date(),
-        };
+            id: generateId(),
+            createdAt: new Date(),
+          };
 
-        const messages = [filesMessage];
+          const messages = [filesMessage];
 
-        if (commandsMessage) {
-          messages.push(commandsMessage);
+          if (commandsMessage) {
+            messages.push({
+              role: 'user',
+              id: generateId(),
+              content: 'Setup the codebase and Start the application',
+            });
+            messages.push(commandsMessage);
+          }
+
+          await importChat(`Git Project:${repoUrl.split('/').slice(-1)[0]}`, messages, { gitUrl: repoUrl });
         }
+      } catch (error) {
+        console.error('Error during import:', error);
+        toast.error('Failed to import repository');
+        setLoading(false);
+        window.location.href = '/';
 
-        await importChat(`Git Project:${repoUrl.split('/').slice(-1)[0]}`, messages);
+        return;
       }
     }
   };

@@ -1,33 +1,15 @@
 import { type ActionFunctionArgs } from '@remix-run/cloudflare';
-
-//import { StreamingTextResponse, parseStreamPart } from 'ai';
 import { streamText } from '~/lib/.server/llm/stream-text';
 import { stripIndents } from '~/utils/stripIndent';
-import type { IProviderSetting, ProviderInfo } from '~/types/model';
+import type { ProviderInfo } from '~/types/model';
+import { getApiKeysFromCookie, getProviderSettingsFromCookie } from '~/lib/api/cookies';
+import { createScopedLogger } from '~/utils/logger';
 
 export async function action(args: ActionFunctionArgs) {
   return enhancerAction(args);
 }
 
-function parseCookies(cookieHeader: string) {
-  const cookies: any = {};
-
-  // Split the cookie string by semicolons and spaces
-  const items = cookieHeader.split(';').map((cookie) => cookie.trim());
-
-  items.forEach((item) => {
-    const [name, ...rest] = item.split('=');
-
-    if (name && rest) {
-      // Decode the name and value, and join value parts in case it contains '='
-      const decodedName = decodeURIComponent(name.trim());
-      const decodedValue = decodeURIComponent(rest.join('=').trim());
-      cookies[decodedName] = decodedValue;
-    }
-  });
-
-  return cookies;
-}
+const logger = createScopedLogger('api.enhancher');
 
 async function enhancerAction({ context, request }: ActionFunctionArgs) {
   const { message, model, provider } = await request.json<{
@@ -55,12 +37,8 @@ async function enhancerAction({ context, request }: ActionFunctionArgs) {
   }
 
   const cookieHeader = request.headers.get('Cookie');
-
-  // Parse the cookie's value (returns an object or null if no cookie exists)
-  const apiKeys = JSON.parse(parseCookies(cookieHeader || '').apiKeys || '{}');
-  const providerSettings: Record<string, IProviderSetting> = JSON.parse(
-    parseCookies(cookieHeader || '').providers || '{}',
-  );
+  const apiKeys = getApiKeysFromCookie(cookieHeader);
+  const providerSettings = getProviderSettingsFromCookie(cookieHeader);
 
   try {
     const result = await streamText({
@@ -99,15 +77,46 @@ async function enhancerAction({ context, request }: ActionFunctionArgs) {
           `,
         },
       ],
-      env: context.cloudflare.env,
+      env: context.cloudflare?.env as any,
       apiKeys,
       providerSettings,
+      options: {
+        system:
+          'You are a senior software principal architect, you should help the user analyse the user query and enrich it with the necessary context and constraints to make it more specific, actionable, and effective. You should also ensure that the prompt is self-contained and uses professional language. Your response should ONLY contain the enhanced prompt text. Do not include any explanations, metadata, or wrapper tags.',
+
+        /*
+         * onError: (event) => {
+         *   throw new Response(null, {
+         *     status: 500,
+         *     statusText: 'Internal Server Error',
+         *   });
+         * }
+         */
+      },
     });
 
+    // Handle streaming errors in a non-blocking way
+    (async () => {
+      try {
+        for await (const part of result.fullStream) {
+          if (part.type === 'error') {
+            const error: any = part.error;
+            logger.error('Streaming error:', error);
+            break;
+          }
+        }
+      } catch (error) {
+        logger.error('Error processing stream:', error);
+      }
+    })();
+
+    // Return the text stream directly since it's already text data
     return new Response(result.textStream, {
       status: 200,
       headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
+        'Content-Type': 'text/event-stream',
+        Connection: 'keep-alive',
+        'Cache-Control': 'no-cache',
       },
     });
   } catch (error: unknown) {
